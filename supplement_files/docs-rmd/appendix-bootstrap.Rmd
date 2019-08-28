@@ -1,0 +1,438 @@
+# Application to model comparisons
+
+Section \ref{spatial-parametric-bootstrap} presents a data example of how simulation from MRF models may arise in practice. From models presented, Section \ref{a-further-numerical-study-of-simulation-efficacy} then compares both chain mixing and computational speeds of the  conclique-based Gibbs sampler to the standard Gibbs approach.
+
+## Spatial parametric bootstrap
+
+```{r endive-data}
+data(besag.endive)
+endive <- besag.endive
+m <- max(endive$row)
+n <- max(endive$col)
+```
+
+```{r endive-data-plot, fig.cap=paste("The endive dataset, a", m, "$\\times$", n, "rectangular lattice with binary data encoding the incidence of footrot in endive plants."), fig.height=1.75}
+ggplot(endive, aes(col, row, fill = disease)) +
+  geom_tile() +
+  scale_fill_manual("Disease present", values = c("grey80", "black")) +
+  xlab("Column") + ylab("Row")
+
+# encode
+endive$disease <- ifelse(endive$disease == "Y", 1, 0)
+```
+
+Figure \ref{fig:endive-data-plot} shows a spatial dataset from @besag1977some consisting of binary observations located on a $`r m` \times `r n`$ grid, indicating the presence (1) or absence (0) of footrot in endive plants.  We consider fitting three models of increasing complexity to these data via pseudo-likelihood [@besag1975statistical] and apply simulation to obtain reference distributions for statistics based on the resulting estimators. This represents a parametric bootstrap approximation for sampling distributions, where simulation speed is  important in rendering a large number of spatial data sets from differing models. For the spatial binary data, three centered autologistic models are considered as: (a) isotropic [@besag1977some; @caragea2009autologistic], (b) ansiotropic with two dependence parameters, or (c) as in (b) but with large scale structure determined by regression on the horizontal coordinate \(u_i\) of each spatial location \(\boldsymbol s_i=(u_i,v_i)\). For each model, a four-nearest neighborhood is used (with natural adjustments for border observations) and the resulting conditional mass function has the form
+$$
+f_i(y(\boldsymbol s_i)| \boldsymbol y(\mathcal{N}_i), \boldsymbol \theta) =\frac{\exp[y(\boldsymbol s_i) A_i\{\boldsymbol y(\mathcal{N}_i)\}]}{ 1 +\exp[y(\boldsymbol s_i) A_i\{\boldsymbol y(\mathcal{N}_i)\}}, \quad y(\boldsymbol s_i)=0,1,
+$$
+from (\ref{eqn:1})-(\ref{eqn:2}) with natural parameter functions,
+$A_i\{\boldsymbol y(\mathcal{N}_i)\} \equiv A_i\{\boldsymbol y(\mathcal{N}_i)\}(\boldsymbol \theta)$ given in Table \ref{tab:natural-params}, that involve a vector $\boldsymbol \theta$ of parameters contained in a model. In particular, $\boldsymbol \theta$ denotes the collection of parameters $(\kappa, \eta)$ for Model (a), $(\kappa, \eta_u, \eta_v)$ for Model (b), and $(\beta_0,\beta_1, \eta_u, \eta_v)$ for Model (c).
+
+\begin{table}[t]
+\caption{Full conditional distributions (centered autologistic) of three binary MRF models.}
+\label{tab:natural-params}
+\centering
+\begin{tabular}{|p{.1in}  p{6.0in} |}
+\hline
+(a)& Isotropic with $A_i\{\boldsymbol y(\mathcal{N}_i)\} = \log\left(\frac{\kappa}{1-\kappa}\right) + \eta\sum\limits_{\boldsymbol s_j \in \mathcal{N}_i}\{y(\boldsymbol s_j) - \kappa\}$, $\kappa\in(0,1)$, $\eta\in\mathbb{R}$, \& $\mathcal{N}_i =\{\boldsymbol s_i\pm (1,0),\boldsymbol s_i\pm (0,1)\}$     \\[.3cm]
+(b) &Ansiotropic with $A_i\{\boldsymbol y(\mathcal{N}_i)\} = \log\left(\frac{\kappa}{1-\kappa}\right) + \eta_u\sum\limits_{\boldsymbol s_j \in N_{u,i}}\{y(\boldsymbol s_j) - \kappa\} + \eta_v\sum\limits_{\boldsymbol s_j \in N_{v,i}}\{y(\boldsymbol s_j) - \kappa\}$, $\kappa \in (0,1)$, horizontal/vertical dependence $\eta_u,\eta_v\in\mathbb{R}$, \& neighbors $\mathcal{N}_{u,i}=\{\boldsymbol s_i \pm (1,0)\}$, $\mathcal{N}_{v,i}=\{\boldsymbol s_i \pm (0,1)\}$   \\[.3cm]
+(c) & like (b) with $A_i\{\boldsymbol y(\mathcal{N}_i)\}  = \log\left(\frac{\kappa_i}{1-\kappa_i}\right) + \eta_u\sum\limits_{\boldsymbol s_j \in N_{u,i}}\{y(\boldsymbol s_j) - \kappa_i\} + \eta_v\sum\limits_{\boldsymbol s_j \in N_{v,i}}\{y(\boldsymbol s_j) - \kappa_i\}$
+but with $\kappa_i$ determined by  logistic regression $\mathrm{logit}(\kappa_i)  = \beta_0 + \beta_1 u_i$
+on  horizontal coordinate $u_i$ of location $\boldsymbol s_i=(u_i,v_i)$,  \& $\beta_0,\beta_1\in\mathbb{R}$    \\
+\hline
+\end{tabular}
+\end{table}
+
+```{r endive-model-setup, cache=TRUE}
+#create concliques list -------------------------------
+concliques_4nn <- function(grid) {
+  concliques <- list()
+  concliques[[1]] <- grid[(row(grid) %% 2 == 1 & col(grid) %% 2 == 1) | (row(grid) %% 2 == 0 & col(grid) %% 2 == 0)]
+  concliques[[2]] <- grid[(row(grid) %% 2 == 0 & col(grid) %% 2 == 1) | (row(grid) %% 2 == 1 & col(grid) %% 2 == 0)]
+  class(concliques) <- "conclique_cover"
+  return(concliques)
+}
+
+#create grid, lattices, neighbors, concliques for MCMC ------------------
+grid <- matrix(1:(m*n), nrow = m)
+concliques <- concliques_4nn(grid)
+lattice <- lattice_4nn_torus(dimvec = c(m, n))
+neighbors_one_param <- get_neighbors(lattice)
+neighbors_two_param <- get_neighbors(lattice, TRUE, grid)
+inits <- matrix(rbinom(m*n, 1, .5), nrow = m)
+```
+```{r binary-functs}
+#custom functions -----------
+
+#pseudo likelihood fit for conditonal binary model (4 neighbors)
+fit_one_param <- function(data, neighbors, ...) {
+  ## sum of neighbors
+  neigh_sum <- rowSums(matrix(data[neighbors[[1]][,-1]], nrow = length(data)))
+
+  ## fit logistic conditional model: the conditonal prob p of Y given 4 neighbor sum S
+  ## is logit(p) = int + eta*S for int = logit(kappa)-4*eta*(kappa-1/2)
+  model <- glm(data ~ neigh_sum, family = binomial())
+  intercept <- as.numeric(model$coefficients[1])
+  eta <- as.numeric(model$coefficients[2])
+
+  ## retrieve kappa from intercept and eta by finding root of g on (0,1)
+  g <- function(y, params) {
+    eta <- params$eta
+    intercept <- params$intercept
+
+    return(log(y) - log(1 - y) - 4*y*eta - intercept)
+  }
+  kappa <- uniroot(g, c(0, 1), list(eta = eta, intercept = intercept))$root
+
+  list(eta = eta, kappa = kappa)
+}
+fit_two_param <- function(data, neighbors, ...) {
+  ## sum of neighbors
+  neigh_sum <- do.call(cbind, lapply(neighbors, function(x) {
+    rowSums(matrix(data[x[,-1]], nrow = length(data)))
+    }))
+
+  ## fit logistic conditional model: the conditonal prob p of Y given 4 neighbor sum S
+  ## is logit(p) = logit(kappa) + eta1*(S1-2*kappa) + eta2*(S2-2*kappa) or
+  ## logit(p) = int + eta1*S1 + eta2*S2 for int = logit(kappa)-2*eta1*kappa - 2*eta2*kappa
+  model <- glm(data ~ neigh_sum, family = binomial())
+  intercept <- as.numeric(model$coefficients[1])
+  eta_1 <- as.numeric(model$coefficients[2])
+  eta_2 <- as.numeric(model$coefficients[3])
+
+  ## retrieve kappa from intercept and eta by finding root of g on (0,1)
+  g <- function(y, params) {
+    eta_1 <- params$eta_1
+    eta_2 <- params$eta_2
+    intercept <- params$intercept
+
+    return(log(y) - log(1 - y) - 2*y*eta_1 - 2*y*eta_2 - intercept)
+  }
+  kappa <- uniroot(g, c(0, 1), list(eta_1 = eta_1, eta_2 = eta_2, intercept = intercept))$root
+
+  list(eta_1 = eta_1, eta_2 = eta_2, kappa = kappa)
+}
+fit_two_param_reg <- function(data, neighbors, params0, cols, ...) {
+  res <- list()
+  res$data <- data
+  res$u <- (0:(length(res$data) - 1)) %% cols + 1
+  res$nums <- lapply(neighbors, function(neigh) {
+    rowSums(!is.na(neigh[, -1]))
+  })
+  res$sums <- lapply(neighbors, function(neigh) {
+    rowSums(matrix(res$data[neigh[, -1]], ncol = ncol(neigh) - 1, byrow = TRUE))
+  })
+
+
+  #pseudo likelihood functions
+  logf <- function(params, data, fixed) {
+    u <- data$u
+    beta <- params
+    eta <- fixed
+
+    reg <- beta[1] + beta[2]*u
+    kappa <- exp(reg)/(1 + exp(reg))
+    A <- reg + eta[1]*(data$sums[[1]] - data$nums[[1]]*kappa) + eta[2]*(data$sums[[2]] - data$nums[[2]]*kappa)
+    B <- log(1 + exp(A))
+
+    sum(A*data$data - B)
+  }
+  grad <- function(params, data, fixed) {
+    u <- data$u
+    beta <- params
+    eta <- fixed
+
+    reg <- beta[1] + beta[2]*u
+    kappa <- exp(reg)/(1 + exp(reg))
+    A <- reg + eta[1]*(data$sums[[1]] - data$nums[[1]]*kappa) + eta[2]*(data$sums[[2]] - data$nums[[2]]*kappa)
+
+    dk_db0 <- exp(reg)/(1 + exp(reg))^2
+    dk_db1 <- u*dk_db0
+    dA_dk <- 1/kappa + 1/(1 - kappa) - 2*(eta[1] + eta[2])
+    dlogf_dA <- data$data
+    dlogf_dB <- -1
+    dB_dA <- exp(A)/(1 + exp(A))
+
+    dlogf_b0 <- sum(dlogf_dA*dA_dk*dk_db0 + dlogf_dB*dB_dA*dA_dk*dk_db0)
+    dlogf_b1 <- sum(dlogf_dA*dA_dk*dk_db1 + dlogf_dB*dB_dA*dA_dk*dk_db1)
+
+    c(dlogf_b0, dlogf_b1)
+  }
+
+  beta0 <- c(params0$beta_0, params0$beta_1)
+
+  ## fit logistic conditional model: the conditonal prob p of Y given 4 neighbor sum S
+  ## is logit(p) = logit(kappa) + eta1*(S1-2*kappa) + eta2*(S2-2*kappa) or
+  ## logit(p) = int + eta1*S1 + eta2*S2 for int = logit(kappa)-2*eta1*kappa - 2*eta2*kappa
+  sums <- do.call(cbind, res$sums)
+  model <- glm(res$data ~ sums, family = binomial())
+  eta <- as.numeric(model$coefficients[-1])
+
+  ## pseudo likelihood for eta
+  plik <- optim(beta0, logf, gr = grad, data = res, fixed = eta, control = list(fnscale = -1))
+  beta <- as.numeric(plik$par)
+
+  params <- list(beta_0 = beta[1], beta_1 = beta[2], eta_1 = eta[1], eta_2 = eta[2])
+  return(params)
+}
+
+#cdfs
+cdf_one_param <- function(data, params) {
+  eta <- params$eta
+  kappa <- params$kappa
+
+  mean_structure <- log(kappa) - log(1 - kappa) + eta*(data$sums[[1]] - data$nums[[1]]*kappa)
+  p <- exp(mean_structure)/(1 + exp(mean_structure))
+  vapply(seq_along(mean_structure), FUN = function(i) pbinom(data$data[i], 1, p[i]), FUN.VALUE = numeric(1))
+}
+cdf_two_param <- function(data, params) {
+  eta_1 <- params$eta_1
+  eta_2 <- params$eta_2
+  kappa <- params$kappa
+
+  mean_structure <- log(kappa) - log(1 - kappa) + eta_1*(data$sums[[1]] - data$nums[[1]]*kappa) + eta_2*(data$sums[[2]] - data$nums[[2]]*kappa)
+  p <- exp(mean_structure)/(1 + exp(mean_structure))
+  vapply(seq_along(mean_structure), FUN = function(i) pbinom(data$data[i], 1, p[i]), FUN.VALUE = numeric(1))
+}
+cdf_two_param_reg <- function(data, params) {
+  eta_1 <- params$eta_1
+  eta_2 <- params$eta_2
+  beta_0 <- params$beta_0
+  beta_1 <- params$beta_1
+
+  u <- data$u
+  reg <- beta_0 + beta_1*u
+  kappa <- exp(reg)/(1 + exp(reg))
+
+  mean_structure <- reg + eta_1*(data$sums[[1]] - data$nums[[1]]*kappa) + eta_2*(data$sums[[2]] - data$nums[[2]]*kappa)
+  p <- exp(mean_structure)/(1 + exp(mean_structure))
+  vapply(seq_along(mean_structure), FUN = function(i) pbinom(data$data[i], 1, p[i]), FUN.VALUE = numeric(1))
+}
+
+#pmfs
+pmf_one_param <- function(data, params) {
+  eta <- params$eta
+  kappa <- params$kappa
+
+  mean_structure <- log(kappa) - log(1 - kappa) + eta*(data$sums[[1]] - data$nums[[1]]*kappa)
+  p <- exp(mean_structure)/(1 + exp(mean_structure))
+  vapply(seq_along(mean_structure), FUN = function(i) dbinom(data$data[i], 1, p[i]), FUN.VALUE = numeric(1))
+}
+pmf_two_param <- function(data, params) {
+  eta_1 <- params$eta_1
+  eta_2 <- params$eta_2
+  kappa <- params$kappa
+
+  mean_structure <- log(kappa) - log(1 - kappa) + eta_1*(data$sums[[1]] - data$nums[[1]]*kappa) + eta_2*(data$sums[[2]] - data$nums[[2]]*kappa)
+  p <- exp(mean_structure)/(1 + exp(mean_structure))
+  vapply(seq_along(mean_structure), FUN = function(i) dbinom(data$data[i], 1, p[i]), FUN.VALUE = numeric(1))
+}
+pmf_two_param_reg <- function(data, params) {
+  eta_1 <- params$eta_1
+  eta_2 <- params$eta_2
+  beta_0 <- params$beta_0
+  beta_1 <- params$beta_1
+
+  u <- data$u
+  reg <- beta_0 + beta_1*u
+  kappa <- exp(reg)/(1 + exp(reg))
+
+  mean_structure <- reg + eta_1*(data$sums[[1]] - data$nums[[1]]*kappa) + eta_2*(data$sums[[2]] - data$nums[[2]]*kappa)
+  p <- exp(mean_structure)/(1 + exp(mean_structure))
+  vapply(seq_along(mean_structure), FUN = function(i) dbinom(data$data[i], 1, p[i]), FUN.VALUE = numeric(1))
+}
+```
+```{r bootstrap-setup}
+B <- 10000
+burnin <- 1000
+thin <- 5
+iter <- B*thin + burnin
+```
+```{r endive-boot-one, cache=TRUE}
+params_est_one_param <- fit_one_param(endive$disease, neighbors_one_param)
+
+y_star_one_param <- run_conclique_gibbs(concliques, neighbors_one_param, inits, "binary_single_param", params_est_one_param, iter)
+y_star_one_param <- y_star_one_param[(burnin:iter)[burnin:iter %% thin == 1], ]
+gof_stat_star_one_param <- rep(NA, B)
+params_star_one_param <- data.frame(eta = rep(NA, B), kappa = rep(NA, B))
+
+for(i in 1:B) {
+  dat_one_param <- y_star_one_param[i,]
+  params_star_one <- fit_one_param(dat_one_param, neighbors_one_param)
+  params_star_one_param[i, ] <- c(params_star_one$eta, params_star_one$kappa)
+  resids_star_one_param <- spatial_residuals(dat_one_param, neighbors_one_param, "cdf_one_param", params_star_one, discrete = "pmf_one_param")
+  gof_stat_star_one_param[i] <- gof_statistics(resids_star_one_param, concliques, "ks", "max")
+}
+
+resids_one_param <- spatial_residuals(endive$disease, neighbors_one_param, "cdf_one_param", params_est_one_param, discrete = "pmf_one_param")
+gof_stat_one_param <- gof_statistics(resids_one_param, concliques, "ks", "max")
+p_value_one_param <- (sum(gof_stat_star_one_param >= gof_stat_one_param) + 1)/(B + 1)
+```
+```{r endive-boot-two, cache=TRUE}
+
+params_est_two_param <- fit_two_param(endive$disease, neighbors_two_param)
+
+y_star_two_param <- run_conclique_gibbs(concliques, neighbors_two_param, inits, "binary_two_param", params_est_two_param, iter)
+y_star_two_param <- y_star_two_param[(burnin:iter)[burnin:iter %% thin == 1], ]
+gof_stat_star_two_param <- rep(NA, B)
+params_star_two_param <- data.frame(eta_1 = rep(NA, B), eta_2 = rep(NA, B), kappa = rep(NA, B))
+
+for(i in 1:B) {
+  dat_two_param <- y_star_two_param[i,]
+  params_star_two <- fit_two_param(dat_two_param, neighbors_two_param)
+  params_star_two_param[i, ] <- c(params_star_two$eta_1, params_star_two$eta_2, params_star_two$kappa)
+  resids_star_two_param <- spatial_residuals(dat_two_param, neighbors_two_param, "cdf_two_param", params_star_two, discrete = "pmf_two_param")
+  gof_stat_star_two_param[i] <- gof_statistics(resids_star_two_param, concliques, "ks", "max")
+}
+
+resids_two_param <- spatial_residuals(endive$disease, neighbors_two_param, "cdf_two_param", params_est_two_param, discrete = "pmf_two_param")
+gof_stat_two_param <- gof_statistics(resids_two_param, concliques, "ks", "max")
+p_value_two_param <- (sum(gof_stat_star_two_param >= gof_stat_two_param) + 1)/(B + 1)
+
+```
+```{r endive-boot-two-reg, cache=TRUE}
+params_est_two_param_reg <- fit_two_param_reg(endive$disease, neighbors_two_param,
+                                              list(eta_1 = 0, eta_2 = 0, beta_0 = 0, beta_1 = 0), n)
+
+y_star_two_param_reg <- run_conclique_gibbs(concliques, neighbors_two_param, inits, "binary_two_param_reg", params_est_two_param_reg, iter)
+y_star_two_param_reg <- y_star_two_param_reg[(burnin:iter)[burnin:iter %% thin == 1], ]
+gof_stat_star_two_param_reg <- rep(NA, B)
+params_star_two_param_reg <- data.frame(eta_1 = rep(NA, B), eta_2 = rep(NA, B), beta_0 = rep(NA, B), beta_1 = rep(NA, B))
+
+for(i in 1:B) {
+  dat_two_param_reg <- y_star_two_param_reg[i,]
+  params_star_two_reg <- fit_two_param_reg(dat_two_param_reg, neighbors_two_param,
+                                           list(eta_1 = 0, eta_2 = 0, beta_0 = 0, beta_1 = 0), n)
+  params_star_two_param_reg[i, ] <- c(params_star_two_reg$eta_1, params_star_two_reg$eta_2, params_star_two_reg$beta_0, params_star_two_reg$beta_1)
+  resids_star_two_param_reg <- spatial_residuals(dat_two_param_reg, neighbors_two_param, "cdf_two_param_reg", params_star_two_reg, discrete = "pmf_two_param_reg", n)
+  gof_stat_star_two_param_reg[i] <- gof_statistics(resids_star_two_param_reg, concliques, "ks", "max")
+}
+
+resids_two_param_reg <- spatial_residuals(endive$disease, neighbors_two_param, "cdf_two_param_reg", params_est_two_param_reg, discrete = "pmf_two_param_reg", n)
+gof_stat_two_param_reg <- gof_statistics(resids_two_param_reg, concliques, "ks", "max")
+p_value_two_param_reg <- (sum(gof_stat_star_two_param_reg >= gof_stat_two_param_reg) + 1)/(B + 1)
+```
+
+
+```{r endive-table, results='asis'}
+endive_table0 <- data.frame(apply(params_star_one_param, 2, quantile, probs = c(.025, .5, .975)))
+colnames(endive_table0) <- c("$\\eta$", "$\\kappa$")
+
+endive_table1 <- data.frame(apply(params_star_two_param, 2, quantile, probs = c(.025, .5, .975)))
+colnames(endive_table1) <- c("$\\eta_u$", "$\\eta_v$", "$\\kappa$")
+
+endive_table2 <- data.frame(apply(params_star_two_param_reg, 2, quantile, probs = c(.025, .5, .975)))
+colnames(endive_table2) <- c("$\\eta_u$", "$\\eta_v$", "$\\beta_0$", "$\\beta_1$")
+rownames(endive_table2) <- paste0(unlist(strsplit(rownames(endive_table2), "%")), "\\%")
+
+endive_table0 %>%
+  bind_cols(endive_table1) %>%
+  bind_cols(endive_table2) -> endive_table_all
+rownames(endive_table_all) <- rownames(endive_table2)
+
+endive_table_all %>%
+  xtable(label = "tab:endive-table",
+         align = c("|", "l", "|", "r", "r", "|", "r", "r", "r", "|", "r", "r", "r", "r", "|"),
+         caption = "Bootstrap percentile confidence intervals in all three autologistic models.",
+         digits = 3) -> endive_table
+
+
+addtorow <- list()
+addtorow$pos <- list(-1)
+addtorow$command <- "\\hline &\\multicolumn{2}{|c|}{Model (a)} & \\multicolumn{3}{|c|}{Model (b)} & \\multicolumn{4}{|c|}{Model (c)} \\\\\n"
+
+print(endive_table, add.to.row = addtorow, sanitize.text.function = function(x){x}, comment = FALSE)
+
+```
+
+
+```{r endive-param-plot, fig.height=1.75, fig.show="hold", fig.cap='Approximated sampling distributions of dependence parameter estimates  for the three centered autologistic models with four-nearest neighbors: (a)  isotropic  with one dependence parameter $\\eta$, (b) ansiotropic with two dependence parameters $\\eta_u$,  $\\eta_v$, and (c) as in (b) but with a marginal mean involving regression on horizontal location $u_i$.', out.width='100%'}
+# one param
+ggplot() +
+  geom_density(aes(params_star_one_param$eta), fill = "grey20", alpha = .5) +
+  geom_vline(aes(xintercept = params_est_one_param$eta), colour = "red") +
+  geom_text(aes(x = params_est_one_param$eta + diff(range(params_star_one_param$eta))/100,
+                y = max(density(params_star_one_param$eta)$y)*.75,
+                label = paste0("hat(eta) == " , round(params_est_one_param$eta, 4))),
+            family = "serif", hjust = 0, parse = TRUE) +
+  xlab("") +
+  ggtitle("(a)")
+
+# two param
+t(unlist(params_est_two_param)) %>%
+  data.frame() %>%
+  select(starts_with("eta")) %>%
+  rename(`eta[u]` = eta_1, `eta[v]` = eta_2) %>%
+  gather(param, value) -> ests_two_param
+
+params_star_two_param %>%
+  select(starts_with("eta")) %>%
+  rename(`eta[u]` = eta_1, `eta[v]` = eta_2) %>%
+  gather(param, value) %>%
+  ggplot() +
+  geom_density(aes(value), fill = "grey20", alpha = .5) +
+  geom_vline(aes(xintercept = value), colour = "red", data = ests_two_param) +
+  geom_text(aes(x = value + diff(range(params_star_two_param$eta_1))/100,
+                y = max(density(params_star_two_param$eta_1)$y)*.75,
+                label = paste0("hat(eta) == " , round(value, 4))),
+            family = "serif", hjust = 0, parse = TRUE, data = ests_two_param) +
+  facet_wrap(~param, labeller = label_parsed) +
+  xlab("") +
+  ggtitle("(b)")
+
+# two param reg
+t(unlist(params_est_two_param_reg)) %>%
+  data.frame() %>%
+  select(starts_with("eta")) %>%
+  rename(`eta[u]` = eta_1, `eta[v]` = eta_2) %>%
+  gather(param, value) -> ests_two_param_reg
+
+params_star_two_param_reg %>%
+  select(starts_with("eta")) %>%
+  rename(`eta[u]` = eta_1, `eta[v]` = eta_2) %>%
+  gather(param, value) %>%
+  ggplot() +
+  geom_density(aes(value), fill = "grey20", alpha = .5) +
+  geom_vline(aes(xintercept = value), colour = "red", data = ests_two_param_reg) +
+  geom_text(aes(x = value + diff(range(params_star_two_param_reg$eta_1))/100,
+                y = max(density(params_star_two_param_reg$eta_1)$y)*.75,
+                label = paste0("hat(eta) == " , round(value, 4))),
+            family = "serif", hjust = 0, parse = TRUE, data = ests_two_param_reg) +
+  facet_wrap(~param, labeller = label_parsed) +
+  xlab("") +
+  ggtitle("(c)")
+```
+
+To calibrate confidence intervals for a model based on pseudo-likelihood estimates $\widehat{\boldsymbol \theta}$, normal approximations are difficult as standard errors from pseudo-likelihood depend intricately on the spatial dependence, with no tractable form [cf. @guyon1982parameter]. Instead, simulation with a model-based bootstrap may be applied to approximate the sampling distribution of $\widehat{\boldsymbol \theta}$ under each model. Using conditional distributions prescribed by estimates $\widehat{\boldsymbol \theta}$ as a proxy for the unknown parameters $\boldsymbol \theta$, we generated $10,000$ spatial samples of same size as the endive data from each binary MRF model based on the CGS (after a burn-in of $1,000$ and thinning by a factor of $5$ as conservative selections from trace plots). A bootstrap parameter estimate, say $\widehat{\boldsymbol \theta}^*$, was obtained from each simulated sample. Relying on the applicability of a percentile parametric bootstrap approach [@davison1997bootstrap, ch. 5], quantiles of the empirical distribution of bootstrap estimates are used to approximate quantiles of the sampling distribution of
+\(\widehat{\boldsymbol \theta}\). Figure \ref{fig:endive-param-plot} displays the approximated distributions for dependence parameter estimates (e.g., $\eta$, $\eta_u$, $\eta_v$) in the three models, while Table \ref{tab:endive-table} shows 95\% bootstrap confidence intervals for all model parameters. The intervals suggest that spatial dependence is a significant aspect of Models (a) and (b), but that most of the explanatory power of Model (c) lies in the model's large scale structure.
+
+Using the same MRF-based simulations, we may also further assess the goodness-of-fit  of all three models to the endive data  through test statistics from [KLN]. That is, rather than the large-sample theory in [KLN], we may more easily approximate reference distributions for such test statistics by evaluating these from the same collection of bootstrap simulated data sets. The subsequent p-values on model adequacy are $`r round(p_value_one_param, 2)`$,  $`r round(p_value_two_param, 2)`$, and $`r round(p_value_two_param_reg, 2)`$ for Models (a)-(c), respectively. These results support a conclusion of @besag2001markov regarding the lack-of-fit of Model (a) (i.e., isotropic autologistic model), but we find Models (b) and (c) are more compatible with these data by adding directional model structure, i.e., Model (b) as directional spatial dependence and Model (c) as a large-scale model component.
+
+```{r endive-timing, cache=TRUE}
+time <- Sys.time()
+tmp <- run_conclique_gibbs(concliques, neighbors_one_param, inits, "binary_single_param", params_est_one_param, 100)
+conc_time_m0 <- difftime(Sys.time(), time, units = "secs")
+
+time <- Sys.time()
+tmp <- run_conclique_gibbs(concliques, neighbors_two_param, inits, "binary_two_param", params_est_two_param, 100)
+conc_time_m1 <- difftime(Sys.time(), time, units = "secs")
+
+time <- Sys.time()
+tmp <- run_conclique_gibbs(concliques, neighbors_two_param, inits, "binary_two_param_reg", params_est_two_param_reg, 100)
+conc_time_m2 <- difftime(Sys.time(), time, units = "secs")
+
+time <- Sys.time()
+tmp <- run_sequential_gibbs(neighbors_one_param, inits, "binary_single_param", params_est_one_param, 100)
+seq_time_m0 <- difftime(Sys.time(), time, units = "secs")
+
+time <- Sys.time()
+tmp <- run_sequential_gibbs(neighbors_two_param, inits, "binary_two_param", params_est_two_param, 100)
+seq_time_m1 <- difftime(Sys.time(), time, units = "secs")
+
+time <- Sys.time()
+tmp <- run_sequential_gibbs(neighbors_two_param, inits, "binary_two_param_reg", params_est_two_param_reg, 100)
+seq_time_m2 <- difftime(Sys.time(), time, units = "secs")
+```
+
+As suggested in this example, repeated simulation from MRF models can be useful for quantifying uncertainty in  model fitting, provided that adequate data generation can be performed with reasonable speed. With the proposed CGS, the generation of the data sets for bootstrap reference distributions above required $`r round((conc_time_m0)/100*B, 2)`$,
+$`r round((conc_time_m1)/100*B, 2)`$, and $`r round((conc_time_m2)/100*B, 2)`$ seconds, respectively, for Models (a)-(c). In comparison,  for the same number of data generations, the standard sequential Gibbs approach would have taken approximately $`r round((seq_time_m0 - conc_time_m0)/100*B/60, 1)`$ minutes for Model (a) and  about $`r round((seq_time_m1 - conc_time_m0)/100*B/60, 1)`$ minutes for Models (b)-(c), and the numerical results would have been virtually identical to the CGS. Hence, the conclique-based  sampler, while more efficient here in computational time, may not necessarily mix any faster than the standard Gibbs approach (i.e., exhibit better chain convergence). We numerically examine this aspect in greater detail next.

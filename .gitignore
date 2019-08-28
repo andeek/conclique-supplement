@@ -16,6 +16,7 @@
 
 # RStudio files
 .Rproj.user/
+conclique-supplement.Rproj
 
 # produced vignettes
 vignettes/*.html
