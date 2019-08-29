@@ -15,7 +15,6 @@ We include two data files that correspond to the real data example in Section 5.
 
 Chyzh, Olga V, and Mark S Kaiser. 2019. "A Local Structure Graph Model: Modeling Formation of Network Edges as a Function of Other Edges." Political Analysis In Press.
 
-
 ### edgedat.txt
 
 This is a file with columns `ccode1`, `ccode2`, `edge`, `defense`, `mil_ratio`, `tot_trade`, `joint_dem`, `year`, `edgelab`, and `nis`

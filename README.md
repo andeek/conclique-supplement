@@ -15,4 +15,4 @@ This repo contains
 1. appendices -- includes additional sampler versions, proofs of results, construction of concliques for graphs with incident neighborhoods, and a spatial bootstrap example.
 2. code -- all necessary R and C++ scripts for generating the figures in the paper.
 3. data -- all necessary data files to re-run the real data network example in Section 5.2.
-3. README.md -- this instructional README document.
+4. README.md -- this instructional README document.

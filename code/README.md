@@ -18,7 +18,7 @@ This folder contains all necessary R and C++ scripts for generating the figures 
 3. gibbs_efficiency.R -- A script to create all the Gibbs computational and algorithmic timing results.
 4. sw_efficiency.R -- A script to create the Swendsen-Wang computational and algorithmic timing results.
 5. dsatur_network_example.R -- A script to create the concliques using DSatur and perform the analysis of Section 5.2.
-3. helpers/ -- A folder containing functions used in the main scripts as well as scripts for generating store results.
-4. written_results/ -- A folder containing cached timing results for the 4nn Gaussian MRF and the network timing examples.
-5. README.md -- this instructional README document.
+6. helpers/ -- A folder containing functions used in the main scripts as well as scripts for generating store results.
+7. written_results/ -- A folder containing cached timing results for the 4nn Gaussian MRF and the network timing examples.
+8. README.md -- this instructional README document.
 
