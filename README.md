@@ -1,6 +1,6 @@
-# Supplementary material for "Simulating Markov random fields with a conclique-based Gibbs sampler"
+# Supplemental material for "Simulating Markov random fields with a conclique-based Gibbs sampler"
 
-This is the supplementary material accompanying "Simulating Markov random fields with a conclique-based Gibbs sampler", a paper published in the Journal of Computational and Graphical Statistics.
+This is the supplemental material accompanying "Simulating Markov random fields with a conclique-based Gibbs sampler", a paper published in the Journal of Computational and Graphical Statistics.
 
 ## Authors
 
@@ -12,9 +12,7 @@ Daniel J. Nordman, Iowa State University
 ## Contents
 
 This repo contains
-
-1. supplement.pdf -- PDF of supplemental materials and all files (including code) to build this document. Includes additional sampler versions, proofs of results, construction of concliques for graphs with incident neighborhoods, and a spatial bootstrap example.
-  - supplement.tex -- a tex file with the final text of the supplement. Built by compiling the .Rmd files in supplement_files/docs-rmd/. 
-  - supplement_files/ -- a folder containing the .Rmd filed to build the .tex in docs-rmd/ and all figures included in figure-latex/
-2. code_appendix -- all necessary R and C++ scripts for generating the figures in the main paper. Also contains an instructional README to describe the file structure.
+1. appendices -- includes additional sampler versions, proofs of results, construction of concliques for graphs with incident neighborhoods, and a spatial bootstrap example.
+2. code -- all necessary R and C++ scripts for generating the figures in the paper.
+3. data -- all necessary data files to re-run the real data network example in Section 5.2.
 3. README.md -- this instructional README document.
